@@ -370,7 +370,8 @@ async def serve_feed(username, password, podcast_id, region, locale):
 
 
 async def urlHeadInfo(session, id, url, locale):
-    entry = cache.getHeadEntry(id)
+    cache_key = sha256(url.encode("utf-8")).hexdigest()
+    entry = cache.getHeadEntry(cache_key)
     if entry:
         return entry
 
@@ -383,15 +384,14 @@ async def urlHeadInfo(session, id, url, locale):
             async with session.head(url, allow_redirects=True,
                                     headers=generateHeaders(None, locale),
                                     timeout=timeout) as response:
-                content_length = 0
-                content_type, _ = guess_type(url)
-                if 'content-length' in response.headers:
-                    content_length = response.headers['content-length']
-                if content_type is None and 'content-type' in response.headers:
-                    content_type = response.headers['content-type']
+                response.raise_for_status()
+                content_length = response.headers.get('content-length', '0')
+                content_type = response.headers.get('content-type')
+                if content_type:
+                    content_type = content_type.split(';', 1)[0]
                 else:
-                    content_type = 'audio/mpeg'
-                cache.insertIntoHeadCache(id, content_length, content_type)
+                    content_type = guess_type(url)[0] or 'audio/mpeg'
+                cache.insertIntoHeadCache(cache_key, content_length, content_type)
                 return (content_length, content_type)
 
         except asyncio.TimeoutError:
@@ -402,6 +402,26 @@ async def urlHeadInfo(session, id, url, locale):
                 logging.error(f"All retries failed for HEAD request to {url}")
                 raise  # Re-raise the last exception if all retries fail
 
+
+
+def normalize_audio_url(url):
+    parsed_url = urlsplit(url)
+    signed_audio_hosts = {
+        "media-cdn-episodes.podimo.com",
+        "media-cdn-video-episodes.podimo.com",
+    }
+    audio_path = re.fullmatch(
+        r"/audios/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.mp3",
+        parsed_url.path,
+        re.IGNORECASE,
+    )
+    if parsed_url.hostname in signed_audio_hosts and audio_path:
+        return f"https://cdn.podimo.com/audios/{audio_path.group(1)}.mp3"
+
+    if "hls-media" in url and "/main.m3u8" in url:
+        url = url.replace("hls-media", "audios")
+        url = url.replace("/main.m3u8", ".mp3")
+    return url
 
 
 def extract_audio_url(episode):
@@ -419,9 +439,7 @@ def extract_audio_url(episode):
     for url in candidates:
         if not url:
             continue
-        if "hls-media" in url and "/main.m3u8" in url:
-            url = url.replace("hls-media", "audios")
-            url = url.replace("/main.m3u8", ".mp3")
+        url = normalize_audio_url(url)
         if ".m3u8" not in url.split("?", 1)[0].lower():
             return url, duration
         if fallback is None:

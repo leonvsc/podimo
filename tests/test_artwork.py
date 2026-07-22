@@ -118,6 +118,22 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AudioUrlTests(unittest.TestCase):
+    def test_signed_video_audio_url_uses_public_cdn(self):
+        url = (
+            "https://media-cdn-video-episodes.podimo.com/audios/"
+            "8377afbd-9917-4862-910f-a5da61087f96.mp3?KeyName=key&Signature=value"
+        )
+
+        self.assertEqual(
+            main.normalize_audio_url(url),
+            "https://cdn.podimo.com/audios/8377afbd-9917-4862-910f-a5da61087f96.mp3",
+        )
+
+    def test_unrelated_audio_url_is_not_rewritten(self):
+        url = "https://example.com/audios/8377afbd-9917-4862-910f-a5da61087f96.mp3"
+
+        self.assertEqual(main.normalize_audio_url(url), url)
+
     def test_direct_audio_url_is_preferred_over_hls(self):
         episode = {
             "audioUrl": "https://cdn.podimo.com/audios/episode.mp3",
@@ -175,6 +191,68 @@ class AudioUrlTests(unittest.TestCase):
         }
 
         self.assertEqual(main.extract_audio_url(episode), (url, 120))
+
+
+class HeadInfoTests(unittest.IsolatedAsyncioTestCase):
+    @patch("main.cache.insertIntoHeadCache")
+    @patch("main.cache.getHeadEntry", return_value=None)
+    async def test_head_metadata_is_cached_by_url(self, get_entry, insert_entry):
+        class Response:
+            headers = {
+                "content-length": "66902653",
+                "content-type": "audio/mpeg; charset=binary",
+            }
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            def raise_for_status(self):
+                pass
+
+        class Session:
+            def head(self, *args, **kwargs):
+                return Response()
+
+        url = "https://cdn.podimo.com/audios/episode.mp3"
+
+        result = await main.urlHeadInfo(Session(), "episode-id", url, "nl-NL")
+
+        cache_key = main.sha256(url.encode("utf-8")).hexdigest()
+        get_entry.assert_called_once_with(cache_key)
+        insert_entry.assert_called_once_with(cache_key, "66902653", "audio/mpeg")
+        self.assertEqual(result, ("66902653", "audio/mpeg"))
+
+    @patch("main.cache.insertIntoHeadCache")
+    @patch("main.cache.getHeadEntry", return_value=None)
+    async def test_failed_head_response_is_not_cached(self, get_entry, insert_entry):
+        class Response:
+            headers = {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            def raise_for_status(self):
+                raise RuntimeError("Forbidden")
+
+        class Session:
+            def head(self, *args, **kwargs):
+                return Response()
+
+        with self.assertRaisesRegex(RuntimeError, "Forbidden"):
+            await main.urlHeadInfo(
+                Session(),
+                "episode-id",
+                "https://cdn.podimo.com/audios/episode.mp3",
+                "nl-NL",
+            )
+
+        insert_entry.assert_not_called()
 
 
 class PodcastAudioQueryTests(unittest.IsolatedAsyncioTestCase):
