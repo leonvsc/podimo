@@ -18,6 +18,7 @@
 # permissions and limitations under the Licence.
 
 from podimo.config import *
+from hashlib import sha256
 from typing import Dict, Tuple
 from time import time
 from diskcache import Cache
@@ -43,6 +44,9 @@ podcast_cache = Cache(join(CACHE_DIR, 'podcast_cache'))
 # the file size of the episode. The file size of an episode doesn't change often,
 # which makes it perfect for caching.
 head_cache = Cache(join(CACHE_DIR, 'head_cache'))
+artwork_cache = Cache(join(CACHE_DIR, 'artwork_cache'))
+ARTWORK_CACHE_TIME = 7 * 24 * 60 * 60
+ARTWORK_FAILURE_CACHE_TIME = 5 * 60
 
 def getCacheEntry(key: str, cache, delete=True):
     if key in cache:
@@ -69,3 +73,24 @@ def insertIntoHeadCache(key, content_length, content_type):
 def insertIntoPodcastCache(key, podcast):
     insertCacheEntry(key, podcast, PODCAST_CACHE_TIME, podcast_cache)
 
+def registerArtworkSource(url):
+    key = sha256(url.encode("utf-8")).hexdigest()
+    source_key = f"source:{key}"
+    if artwork_cache.get(source_key) != url:
+        artwork_cache[source_key] = url
+    return key
+
+def getArtworkSource(key):
+    return artwork_cache.get(f"source:{key}")
+
+def getArtwork(key):
+    return artwork_cache.get(f"image:{key}")
+
+def insertArtwork(key, artwork):
+    artwork_cache.set(f"image:{key}", artwork, expire=ARTWORK_CACHE_TIME)
+
+def getArtworkFailure(key):
+    return artwork_cache.get(f"failure:{key}")
+
+def insertArtworkFailure(key):
+    artwork_cache.set(f"failure:{key}", True, expire=ARTWORK_FAILURE_CACHE_TIME)
