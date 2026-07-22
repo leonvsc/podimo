@@ -370,6 +370,7 @@ async def serve_feed(username, password, podcast_id, region, locale):
 
 
 async def urlHeadInfo(session, id, url, locale):
+    url = normalize_audio_url(url)
     cache_key = sha256(url.encode("utf-8")).hexdigest()
     entry = cache.getHeadEntry(cache_key)
     if entry:
@@ -461,6 +462,10 @@ async def addFeedEntry(fg, episode, session, locale):
     url, duration = extract_audio_url(episode)
     if url is None:
         return 
+    original_url = url
+    url = normalize_audio_url(url)
+    if url != original_url:
+        logging.debug(f"Normalized audio URL for episode {episode['id']} to {url}")
     logging.debug(f"Found podcast '{episode['title']}'")
     fe.podcast.itunes_duration(duration)
     content_length, content_type = await urlHeadInfo(session, episode['id'], url, locale)

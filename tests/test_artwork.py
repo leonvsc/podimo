@@ -213,14 +213,29 @@ class HeadInfoTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
         class Session:
+            requested_url = None
+
             def head(self, *args, **kwargs):
+                self.requested_url = args[0]
                 return Response()
 
-        url = "https://cdn.podimo.com/audios/episode.mp3"
+        signed_url = (
+            "https://media-cdn-video-episodes.podimo.com/audios/"
+            "8377afbd-9917-4862-910f-a5da61087f96.mp3"
+            "?KeyName=key&Signature=value"
+        )
+        public_url = (
+            "https://cdn.podimo.com/audios/"
+            "8377afbd-9917-4862-910f-a5da61087f96.mp3"
+        )
+        session = Session()
 
-        result = await main.urlHeadInfo(Session(), "episode-id", url, "nl-NL")
+        result = await main.urlHeadInfo(
+            session, "episode-id", signed_url, "nl-NL"
+        )
 
-        cache_key = main.sha256(url.encode("utf-8")).hexdigest()
+        cache_key = main.sha256(public_url.encode("utf-8")).hexdigest()
+        self.assertEqual(session.requested_url, public_url)
         get_entry.assert_called_once_with(cache_key)
         insert_entry.assert_called_once_with(cache_key, "66902653", "audio/mpeg")
         self.assertEqual(result, ("66902653", "audio/mpeg"))
@@ -307,7 +322,11 @@ class FeedArtworkTests(unittest.IsolatedAsyncioTestCase):
                     "description": "Episode description",
                     "publishDatetime": datetime(2026, 7, 22, tzinfo=timezone.utc),
                     "imageUrl": "https://cdn.example.com/episode.webp",
-                    "audioUrl": "https://cdn.example.com/episode.mp3",
+                    "audioUrl": (
+                        "https://media-cdn-video-episodes.podimo.com/audios/"
+                        "8377afbd-9917-4862-910f-a5da61087f96.mp3"
+                        "?KeyName=key&Signature=value"
+                    ),
                     "audio": {
                         "url": "https://cdn.example.com/episode.m3u8",
                         "duration": 60,
@@ -325,9 +344,14 @@ class FeedArtworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Episode one", feed_text)
         self.assertIn(f"/artwork/{'f' * 64}.jpg", feed_text)
         self.assertNotIn(".webp", feed_text)
-        self.assertIn("https://cdn.example.com/episode.mp3", feed_text)
+        public_url = (
+            "https://cdn.podimo.com/audios/"
+            "8377afbd-9917-4862-910f-a5da61087f96.mp3"
+        )
+        self.assertIn(public_url, feed_text)
+        self.assertNotIn("Signature", feed_text)
         self.assertNotIn("episode.m3u8", feed_text)
-        url_head_info.assert_awaited_once()
+        self.assertEqual(url_head_info.await_args.args[2], public_url)
 
 
 if __name__ == "__main__":
