@@ -406,6 +406,10 @@ async def urlHeadInfo(session, id, url, locale):
 
 
 def normalize_audio_url(url):
+    if "hls-media" in url and "/main.m3u8" in url:
+        url = url.replace("hls-media", "audios")
+        url = url.replace("/main.m3u8", ".mp3")
+
     parsed_url = urlsplit(url)
     signed_audio_hosts = {
         "media-cdn-episodes.podimo.com",
@@ -419,9 +423,6 @@ def normalize_audio_url(url):
     if parsed_url.hostname in signed_audio_hosts and audio_path:
         return f"https://cdn.podimo.com/audios/{audio_path.group(1)}.mp3"
 
-    if "hls-media" in url and "/main.m3u8" in url:
-        url = url.replace("hls-media", "audios")
-        url = url.replace("/main.m3u8", ".mp3")
     return url
 
 

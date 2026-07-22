@@ -118,6 +118,42 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AudioUrlTests(unittest.TestCase):
+    def test_real_episode_payload_resolves_to_public_mp3(self):
+        episode = {
+            "audioUrl": (
+                "https://media-cdn-episodes.podimo.com/"
+                "8377afbd-9917-4862-910f-a5da61087f96/"
+                "8377afbd-9917-4862-910f-a5da61087f96.m3u8"
+                "?KeyName=media-cdn-episodes-manifest-key&Signature=manifest"
+            ),
+            "audio": {
+                "duration": 2787,
+                "url": (
+                    "https://media-cdn-episodes.podimo.com/"
+                    "8377afbd-9917-4862-910f-a5da61087f96/"
+                    "8377afbd-9917-4862-910f-a5da61087f96.m3u8"
+                    "?KeyName=media-cdn-episodes-manifest-key&Signature=manifest"
+                ),
+            },
+            "streamMedia": {
+                "duration": 2787,
+                "url": (
+                    "https://media-cdn-video-episodes.podimo.com/hls-media/"
+                    "8377afbd-9917-4862-910f-a5da61087f96/main.m3u8"
+                    "?KeyName=media-cdn-video-episodes-manifest-key&Signature=stream"
+                ),
+            },
+        }
+
+        self.assertEqual(
+            main.extract_audio_url(episode),
+            (
+                "https://cdn.podimo.com/audios/"
+                "8377afbd-9917-4862-910f-a5da61087f96.mp3",
+                2787,
+            ),
+        )
+
     def test_signed_video_audio_url_uses_public_cdn(self):
         url = (
             "https://media-cdn-video-episodes.podimo.com/audios/"
