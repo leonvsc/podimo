@@ -117,6 +117,97 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await resolver.resolve("example.com", 443), addresses)
 
 
+class AudioUrlTests(unittest.TestCase):
+    def test_direct_audio_url_is_preferred_over_hls(self):
+        episode = {
+            "audioUrl": "https://cdn.podimo.com/audios/episode.mp3",
+            "audio": {
+                "url": "https://media-cdn-episodes.podimo.com/episode.m3u8?token=x",
+                "duration": 120,
+            },
+            "streamMedia": None,
+        }
+
+        self.assertEqual(
+            main.extract_audio_url(episode),
+            ("https://cdn.podimo.com/audios/episode.mp3", 120),
+        )
+
+    def test_nested_direct_audio_is_preferred_over_stream_hls(self):
+        episode = {
+            "audioUrl": None,
+            "audio": {
+                "url": "https://cdn.podimo.com/audios/episode.mp3",
+                "duration": 120,
+            },
+            "streamMedia": {
+                "url": "https://cdn.podimo.com/hls-media/episode/main.m3u8",
+                "duration": 120,
+            },
+        }
+
+        self.assertEqual(
+            main.extract_audio_url(episode),
+            ("https://cdn.podimo.com/audios/episode.mp3", 120),
+        )
+
+    def test_legacy_stream_hls_url_is_converted_to_mp3(self):
+        episode = {
+            "audioUrl": None,
+            "audio": None,
+            "streamMedia": {
+                "url": "https://cdn.podimo.com/hls-media/episode/main.m3u8",
+                "duration": 120,
+            },
+        }
+
+        self.assertEqual(
+            main.extract_audio_url(episode),
+            ("https://cdn.podimo.com/audios/episode.mp3", 120),
+        )
+
+    def test_modern_hls_remains_last_resort(self):
+        url = "https://media-cdn-episodes.podimo.com/episode/episode.m3u8?token=x"
+        episode = {
+            "audioUrl": None,
+            "audio": {"url": url, "duration": 120},
+            "streamMedia": None,
+        }
+
+        self.assertEqual(main.extract_audio_url(episode), (url, 120))
+
+
+class PodcastAudioQueryTests(unittest.IsolatedAsyncioTestCase):
+    @patch("podimo.client.insertIntoPodcastCache")
+    @patch("podimo.client.getCacheEntry")
+    async def test_old_cache_is_refetched_with_direct_audio_url(
+        self, get_cache_entry, insert_podcast
+    ):
+        get_cache_entry.return_value = {
+            "episodes": [{"id": "old-episode"}],
+            "podcast": {"title": "Old podcast"},
+        }
+        fresh_result = {
+            "episodes": [
+                {
+                    "id": "new-episode",
+                    "audioUrl": "https://cdn.example.com/a.mp3",
+                }
+            ],
+            "podcast": {"title": "Fresh podcast"},
+        }
+        client = main.PodimoClient("test@example.com", "password", "nl", "nl-NL")
+        client.token = "token"
+        client.post = AsyncMock(return_value=fresh_result)
+
+        result = await client.getPodcasts("podcast-id", object())
+
+        self.assertEqual(result, fresh_result)
+        query = client.post.await_args.args[1]
+        self.assertIn("audioUrl", query)
+        insert_podcast.assert_called_once_with("podcast-id", fresh_result)
+
+
 class FeedArtworkTests(unittest.IsolatedAsyncioTestCase):
     @patch("main.urlHeadInfo", new_callable=AsyncMock, return_value=("123", "audio/mpeg"))
     @patch("main.cache.registerArtworkSource", return_value="f" * 64)
@@ -138,8 +229,9 @@ class FeedArtworkTests(unittest.IsolatedAsyncioTestCase):
                     "description": "Episode description",
                     "publishDatetime": datetime(2026, 7, 22, tzinfo=timezone.utc),
                     "imageUrl": "https://cdn.example.com/episode.webp",
+                    "audioUrl": "https://cdn.example.com/episode.mp3",
                     "audio": {
-                        "url": "https://cdn.example.com/episode.mp3",
+                        "url": "https://cdn.example.com/episode.m3u8",
                         "duration": 60,
                     },
                     "streamMedia": None,
@@ -155,6 +247,8 @@ class FeedArtworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Episode one", feed_text)
         self.assertIn(f"/artwork/{'f' * 64}.jpg", feed_text)
         self.assertNotIn(".webp", feed_text)
+        self.assertIn("https://cdn.example.com/episode.mp3", feed_text)
+        self.assertNotIn("episode.m3u8", feed_text)
         url_head_info.assert_awaited_once()
 
 

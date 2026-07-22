@@ -155,6 +155,12 @@ class PodimoClient:
 
     async def getPodcasts(self, podcast_id, scraper):
         podcast = getCacheEntry(podcast_id, podcast_cache)
+        if (
+            podcast
+            and podcast.get("episodes")
+            and "audioUrl" not in podcast["episodes"][0]
+        ):
+            podcast = None
         if podcast:
             timestamp, _ = podcast_cache[podcast_id]
             podcastName = self.getPodcastName(podcast)
@@ -196,6 +202,7 @@ class PodimoClient:
                 datetime
                 publishDatetime
                 title
+                audioUrl
                 audio {
                 url
                 duration

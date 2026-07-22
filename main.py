@@ -405,21 +405,29 @@ async def urlHeadInfo(session, id, url, locale):
 
 
 def extract_audio_url(episode):
-    duration = 0
-    url = None
-    if episode['audio']:
-        url = episode['audio']['url']
-        duration = episode['audio']['duration']
+    audio = episode.get("audio") or {}
+    stream_media = episode.get("streamMedia") or {}
+    duration = audio.get("duration") or stream_media.get("duration") or 0
 
-    if url is None or url == "":
-        if episode["streamMedia"]:
-            url = episode["streamMedia"]["url"]
-            duration = episode["streamMedia"]["duration"]
-            if "hls-media" in url and "/main.m3u8" in url:
-                url = url.replace("hls-media", "audios")
-                url = url.replace("/main.m3u8", ".mp3")
+    candidates = [
+        episode.get("audioUrl"),
+        audio.get("url"),
+        stream_media.get("url"),
+    ]
+    fallback = None
 
-    return url, duration
+    for url in candidates:
+        if not url:
+            continue
+        if "hls-media" in url and "/main.m3u8" in url:
+            url = url.replace("hls-media", "audios")
+            url = url.replace("/main.m3u8", ".mp3")
+        if ".m3u8" not in url.split("?", 1)[0].lower():
+            return url, duration
+        if fallback is None:
+            fallback = url
+
+    return fallback, duration
 
 
 async def addFeedEntry(fg, episode, session, locale):
