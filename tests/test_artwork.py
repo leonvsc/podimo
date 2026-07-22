@@ -118,6 +118,28 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AudioUrlTests(unittest.TestCase):
+    def test_moordcast_manifest_url_uses_public_cdn(self):
+        url = (
+            "https://media-cdn-episodes.podimo.com/"
+            "528e38e2-19f2-4b16-b296-c91f89a71961/"
+            "528e38e2-19f2-4b16-b296-c91f89a71961.m3u8"
+            "?KeyName=media-cdn-episodes-manifest-key&Signature=value"
+        )
+
+        self.assertEqual(
+            main.normalize_audio_url(url),
+            "https://cdn.podimo.com/audios/528e38e2-19f2-4b16-b296-c91f89a71961.mp3",
+        )
+
+    def test_manifest_with_different_ids_is_not_rewritten(self):
+        url = (
+            "https://media-cdn-episodes.podimo.com/"
+            "528e38e2-19f2-4b16-b296-c91f89a71961/"
+            "d716a035-787e-41a2-bf1e-32e4feab1646.m3u8"
+        )
+
+        self.assertEqual(main.normalize_audio_url(url), url)
+
     def test_real_episode_payload_resolves_to_public_mp3(self):
         episode = {
             "audioUrl": (

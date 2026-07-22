@@ -415,13 +415,26 @@ def normalize_audio_url(url):
         "media-cdn-episodes.podimo.com",
         "media-cdn-video-episodes.podimo.com",
     }
+    uuid_pattern = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
     audio_path = re.fullmatch(
-        r"/audios/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.mp3",
+        rf"/audios/({uuid_pattern})\.mp3",
         parsed_url.path,
         re.IGNORECASE,
     )
     if parsed_url.hostname in signed_audio_hosts and audio_path:
         return f"https://cdn.podimo.com/audios/{audio_path.group(1)}.mp3"
+
+    manifest_path = re.fullmatch(
+        rf"/({uuid_pattern})/({uuid_pattern})\.m3u8",
+        parsed_url.path,
+        re.IGNORECASE,
+    )
+    if (
+        parsed_url.hostname in signed_audio_hosts
+        and manifest_path
+        and manifest_path.group(1).lower() == manifest_path.group(2).lower()
+    ):
+        return f"https://cdn.podimo.com/audios/{manifest_path.group(1)}.mp3"
 
     return url
 
