@@ -300,7 +300,60 @@ class HeadInfoTests(unittest.IsolatedAsyncioTestCase):
 
     @patch("main.cache.insertIntoHeadCache")
     @patch("main.cache.getHeadEntry", return_value=None)
-    async def test_failed_head_response_is_not_cached(self, get_entry, insert_entry):
+    async def test_range_get_is_used_when_head_is_forbidden(
+        self, get_entry, insert_entry
+    ):
+        class HeadResponse:
+            headers = {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            def raise_for_status(self):
+                raise main.ClientError("Forbidden")
+
+        class RangeResponse:
+            headers = {
+                "content-length": "1",
+                "content-range": "bytes 0-0/63125235",
+                "content-type": "audio/mpeg",
+            }
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            def raise_for_status(self):
+                pass
+
+        class Session:
+            def head(self, *args, **kwargs):
+                return HeadResponse()
+
+            def get(self, *args, **kwargs):
+                self.get_headers = kwargs["headers"]
+                return RangeResponse()
+
+        session = Session()
+        url = "https://traffic.omny.fm/episode/audio.mp3"
+
+        result = await main.urlHeadInfo(session, "episode-id", url, "nl-NL")
+
+        cache_key = main.sha256(url.encode("utf-8")).hexdigest()
+        self.assertEqual(session.get_headers, {"Range": "bytes=0-0"})
+        insert_entry.assert_called_once_with(cache_key, "63125235", "audio/mpeg")
+        self.assertEqual(result, ("63125235", "audio/mpeg"))
+
+    @patch("main.cache.insertIntoHeadCache")
+    @patch("main.cache.getHeadEntry", return_value=None)
+    async def test_failed_metadata_requests_use_uncached_fallback(
+        self, get_entry, insert_entry
+    ):
         class Response:
             headers = {}
 
@@ -311,21 +364,24 @@ class HeadInfoTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
             def raise_for_status(self):
-                raise RuntimeError("Forbidden")
+                raise main.ClientError("Forbidden")
 
         class Session:
             def head(self, *args, **kwargs):
                 return Response()
 
-        with self.assertRaisesRegex(RuntimeError, "Forbidden"):
-            await main.urlHeadInfo(
-                Session(),
-                "episode-id",
-                "https://cdn.podimo.com/audios/episode.mp3",
-                "nl-NL",
-            )
+            def get(self, *args, **kwargs):
+                return Response()
+
+        result = await main.urlHeadInfo(
+            Session(),
+            "episode-id",
+            "https://traffic.omny.fm/episode/audio.mp3",
+            "nl-NL",
+        )
 
         insert_entry.assert_not_called()
+        self.assertEqual(result, ("0", "audio/mpeg"))
 
 
 class PodcastAudioQueryTests(unittest.IsolatedAsyncioTestCase):

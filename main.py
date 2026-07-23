@@ -28,7 +28,7 @@ from os import getenv
 from podimo.client import PodimoClient
 from feedgen.feed import FeedGenerator
 from mimetypes import guess_type
-from aiohttp import ClientSession, CookieJar, ClientTimeout, TCPConnector
+from aiohttp import ClientError, ClientSession, CookieJar, ClientTimeout, TCPConnector
 from aiohttp.abc import AbstractResolver
 from aiohttp.resolver import DefaultResolver
 from quart import Quart, Response, render_template, request
@@ -376,17 +376,33 @@ async def urlHeadInfo(session, id, url, locale):
     if entry:
         return entry
 
-    retries = 3  # Number of retries
-    timeout = ClientTimeout(total=10)  # 10 seconds timeout for each try
+    timeout = ClientTimeout(total=10)
+    hostname = urlsplit(url).hostname or ""
+    headers = {}
+    if hostname == "podimo.com" or hostname.endswith(".podimo.com"):
+        headers = generateHeaders(None, locale)
 
-    for attempt in range(retries):
+    requests = (
+        ("HEAD", "head", headers),
+        ("range GET", "get", {**headers, "Range": "bytes=0-0"}),
+    )
+    errors = []
+    for method, request_method_name, request_headers in requests:
         try:
-            logging.debug(f"HEAD request to {url} (Attempt {attempt + 1})")
-            async with session.head(url, allow_redirects=True,
-                                    headers=generateHeaders(None, locale),
-                                    timeout=timeout) as response:
+            logging.debug(f"{method} request to {url}")
+            request_method = getattr(session, request_method_name)
+            async with request_method(
+                url,
+                allow_redirects=True,
+                headers=request_headers,
+                timeout=timeout,
+            ) as response:
                 response.raise_for_status()
                 content_length = response.headers.get('content-length', '0')
+                content_range = response.headers.get('content-range', '')
+                range_match = re.fullmatch(r"bytes \d+-\d+/(\d+)", content_range)
+                if range_match:
+                    content_length = range_match.group(1)
                 content_type = response.headers.get('content-type')
                 if content_type:
                     content_type = content_type.split(';', 1)[0]
@@ -394,14 +410,17 @@ async def urlHeadInfo(session, id, url, locale):
                     content_type = guess_type(url)[0] or 'audio/mpeg'
                 cache.insertIntoHeadCache(cache_key, content_length, content_type)
                 return (content_length, content_type)
+        except (asyncio.TimeoutError, ClientError) as error:
+            status = getattr(error, 'status', None)
+            detail = f"HTTP {status}" if status else type(error).__name__
+            errors.append(f"{method}: {detail}")
 
-        except asyncio.TimeoutError:
-            if attempt < retries - 1:
-                logging.info(f"Retrying HEAD request to {url} (Attempt {attempt + 2})")
-                await asyncio.sleep(1)  # Wait for 1 second before retrying
-            else:
-                logging.error(f"All retries failed for HEAD request to {url}")
-                raise  # Re-raise the last exception if all retries fail
+    content_type = guess_type(url)[0] or 'audio/mpeg'
+    logging.warning(
+        f"Could not fetch audio metadata for episode {id}; "
+        f"using fallback metadata ({'; '.join(errors)})"
+    )
+    return ('0', content_type)
 
 
 
